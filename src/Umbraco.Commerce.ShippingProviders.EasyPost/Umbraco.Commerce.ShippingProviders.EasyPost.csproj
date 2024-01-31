@@ -6,11 +6,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\..\Umbraco.Commerce\src\Umbraco.Commerce.Core\Umbraco.Commerce.Core.csproj" />
-    </ItemGroup>
-
-    <ItemGroup>
       <PackageReference Include="EasyPost-Official" />
+      <PackageReference Include="Umbraco.Commerce.Core" />
     </ItemGroup>
 
 </Project>
