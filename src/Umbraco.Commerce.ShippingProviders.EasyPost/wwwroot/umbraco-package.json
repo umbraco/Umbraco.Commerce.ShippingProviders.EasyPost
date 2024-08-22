@@ -1,7 +1,7 @@
 {
   "id": "Umbraco.Commerce.ShippingProviders.EasyPost",
   "name": "EasyPost shipping provider for Umbraco Commerce",
-  "version": "14.0.0--preview.0.g7e37bd4",
+  "version": "14.0.0--rc1.preview.0.gcf6ae53",
   "allowPackageTelemetry": true,
   "extensions": [
     {
