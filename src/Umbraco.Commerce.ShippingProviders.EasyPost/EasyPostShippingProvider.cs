@@ -89,7 +89,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
             }
 
             var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken).ConfigureAwait(false);
-            var orderCurrency = Context.Services.CurrencyService.GetCurrency(context.Order.CurrencyId);
+            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
 
             return new ShippingRatesResult
             {
