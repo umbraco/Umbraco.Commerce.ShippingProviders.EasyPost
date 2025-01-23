@@ -10,7 +10,7 @@
     <GlobalPackageReference Include="Umbraco.JsonSchema.Extensions" Version="0.3.0" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
-    <PackageVersion Include="Umbraco.Commerce.Core" Version="[15.0.0, 15.99.99)" />
+    <PackageVersion Include="Umbraco.Commerce.Core" Version="[15.0.0, 15.999.999)" />
     <PackageVersion Include="EasyPost-Official" Version="[6.8.1, 7)" />
   </ItemGroup>
 </Project>
