@@ -19,7 +19,7 @@ parameters:
     default: false
 
 variables:
-  nodeVersion: 18.x
+  nodeVersion: 22.x
   solution: Umbraco.Commerce.ShippingProviders.EasyPost.sln
   buildConfiguration: Release
   DOTNET_NOLOGO: true
