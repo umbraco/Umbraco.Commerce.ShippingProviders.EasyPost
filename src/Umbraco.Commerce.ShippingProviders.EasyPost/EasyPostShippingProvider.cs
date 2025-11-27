@@ -14,20 +14,13 @@ using EasyPostParams = EasyPost.Parameters;
 
 namespace Umbraco.Commerce.ShippingProviders.EasyPost
 {
-    [ShippingProvider("easypost", "EasyPost", "EasyPost shipping provider")]
-    public class EasyPostShippingProvider : ShippingProviderBase<EasyPostSettings>
+    [ShippingProvider("easypost")]
+    public class EasyPostShippingProvider(
+        UmbracoCommerceContext ctx,
+        ILogger<EasyPostShippingProvider> logger)
+        : ShippingProviderBase<EasyPostSettings>(ctx)
     {
         private static Regex PASCAL_CASE_PATTERN = new Regex(@"(?<=[A-Z])(?=[A-Z][a-z])|(?<=[^A-Z])(?=[A-Z])|(?<=[A-Za-z])(?=[^A-Za-z])");
-
-        private readonly ILogger<EasyPostShippingProvider> _logger;
-
-        public EasyPostShippingProvider(
-            UmbracoCommerceContext ctx,
-            ILogger<EasyPostShippingProvider> logger)
-            : base(ctx)
-        {
-            _logger = logger;
-        }
 
         public override bool SupportsRealtimeRates => true;
 
@@ -37,7 +30,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
 
             if (package == null || !package.HasMeasurements)
             {
-                _logger.Debug("Unable to calculate realtime DHL rates as the package provided is invalid");
+                logger.Debug("Unable to calculate realtime DHL rates as the package provided is invalid");
                 return ShippingRatesResult.Empty;
             }
 
@@ -95,8 +88,8 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 }
             }
 
-            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken).ConfigureAwait(false);
-            var orderCurrency = Context.Services.CurrencyService.GetCurrency(context.Order.CurrencyId);
+            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken);
+            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
 
             return new ShippingRatesResult
             {
