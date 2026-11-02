@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using EasyPost;
 using EasyPost.Models.API;
+using EasyPost.Models.API.Beta;
 using Umbraco.Commerce.Common.Logging;
 using Umbraco.Commerce.Core.Api;
 using Umbraco.Commerce.Core.Models;
@@ -40,15 +42,40 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 : context.Settings.LiveApiKey);
             var client = new Client(clientConfig);
 
-            var pkgLength = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Length) : package.Length;
-            var pkgWidth = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Width) : package.Width;
-            var pkgHeight = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Height) : package.Height;
-            var pkgWeight = context.MeasurementSystem == MeasurementSystem.Metric ? KgToOz(package.Weight) : LbToOz(package.Weight);
-            var customerName = $"{context.Order.CustomerInfo.FirstName} {context.Order.CustomerInfo.LastName}".Trim();
+            var request = BuildStatelessRatesRequest(
+                context.Order.Id,
+                context.Order.CustomerInfo.FirstName,
+                context.Order.CustomerInfo.LastName,
+                context.MeasurementSystem,
+                package,
+                context.Settings.CarrierAccounts);
+
+            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken);
+            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
+
+            return new ShippingRatesResult
+            {
+                Rates = MapRates(rates, orderCurrency.Code, context.Order.CurrencyId, package.Id)
+            };
+        }
+
+        internal EasyPostParams.Beta.Rate.Retrieve BuildStatelessRatesRequest(
+            Guid orderId,
+            string customerFirstName,
+            string customerLastName,
+            MeasurementSystem measurementSystem,
+            Package package,
+            string carrierAccounts)
+        {
+            var pkgLength = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Length) : package.Length;
+            var pkgWidth = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Width) : package.Width;
+            var pkgHeight = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Height) : package.Height;
+            var pkgWeight = measurementSystem == MeasurementSystem.Metric ? KgToOz(package.Weight) : LbToOz(package.Weight);
+            var customerName = $"{customerFirstName} {customerLastName}".Trim();
 
             var request = new EasyPostParams.Beta.Rate.Retrieve
             {
-                Reference = context.Order.Id.ToString(),
+                Reference = orderId.ToString(),
                 ToAddress = new EasyPostParams.Address.Create
                 {
                     Name = customerName,
@@ -75,37 +102,41 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 }
             };
 
-            if (!string.IsNullOrWhiteSpace(context.Settings.CarrierAccounts))
+            var carrierAccountList = ParseCarrierAccounts(carrierAccounts);
+            if (carrierAccountList.Length > 0)
             {
-                var carrierAccount = context.Settings.CarrierAccounts.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim())
-                        .Where(x => !string.IsNullOrWhiteSpace(x))
-                        .Select(x => new CarrierAccount { Id = x })
-                        .ToArray();
-                if (carrierAccount.Length > 0)
-                {
-                    request.CarrierAccounts.AddRange(carrierAccount);
-                }
+                request.CarrierAccounts.AddRange(carrierAccountList);
             }
 
-            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken);
-            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
-
-            return new ShippingRatesResult
-            {
-                Rates = rates
-                    .Where(x => x.Currency.Equals(orderCurrency.Code, StringComparison.OrdinalIgnoreCase))
-                    .Select(x => new ShippingRate(
-                            new Price(decimal.Parse(x.Price ?? "0"), 0, context.Order.CurrencyId),
-                            new ShippingOption(CreateCompositeId(x.Carrier, x.Service), CreateDescription(x.Carrier, x.Service)),
-                            package.Id
-                        )).ToList()
-            };
+            return request;
         }
 
-        private static string CreateCompositeId(string carrierCode, string productCode)
+        internal static CarrierAccount[] ParseCarrierAccounts(string carrierAccounts)
+        {
+            if (string.IsNullOrWhiteSpace(carrierAccounts))
+            {
+                return [];
+            }
+
+            return carrierAccounts.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => new CarrierAccount { Id = x })
+                .ToArray();
+        }
+
+        internal static List<ShippingRate> MapRates(IEnumerable<StatelessRate> rates, string orderCurrencyCode, Guid currencyId, Guid packageId)
+            => rates
+                .Where(x => x.Currency.Equals(orderCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                .Select(x => new ShippingRate(
+                    new Price(decimal.Parse(x.Price ?? "0"), 0, currencyId),
+                    new ShippingOption(CreateCompositeId(x.Carrier, x.Service), CreateDescription(x.Carrier, x.Service)),
+                    packageId))
+                .ToList();
+
+        internal static string CreateCompositeId(string carrierCode, string productCode)
             => $"{carrierCode}__{productCode}".Trim('_');
-        private static string CreateDescription(string carrierCode, string productCode)
+        internal static string CreateDescription(string carrierCode, string productCode)
             => $"{PASCAL_CASE_PATTERN.Replace(carrierCode, " ")} - {PASCAL_CASE_PATTERN.Replace(productCode, " ")}".Trim(' ', '-');
     }
 }
