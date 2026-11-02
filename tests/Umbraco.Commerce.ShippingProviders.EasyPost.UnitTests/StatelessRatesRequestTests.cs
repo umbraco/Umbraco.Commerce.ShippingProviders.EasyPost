@@ -11,7 +11,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost.UnitTests
             => new(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
-                new Address("1 Sender St", "Sender City", "US", "11111"),
+                new Address("1 Sender St", "Unit 2", "Sender City", "NY", "US", "11111"),
                 new Address("1 Main St", null!, "Springfield", "IL", "US", "62701"),
                 Guid.NewGuid(),
                 [],
@@ -92,7 +92,9 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost.UnitTests
             // asserts
             var from = (global::EasyPost.Parameters.Address.Create)request.FromAddress;
             from.Street1.Should().Be("1 Sender St");
+            from.Street2.Should().Be("Unit 2");
             from.City.Should().Be("Sender City");
+            from.State.Should().Be("NY");
             from.Zip.Should().Be("11111");
             from.Country.Should().Be("US");
         }
