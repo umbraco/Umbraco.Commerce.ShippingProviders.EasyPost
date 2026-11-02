@@ -1,3 +1,4 @@
+using System.Globalization;
 using EasyPost.Models.API.Beta;
 using FluentAssertions;
 
@@ -55,6 +56,27 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost.UnitTests
         }
 
         [Fact]
+        public void MapRates_Should_Parse_Price_With_Invariant_Culture()
+        {
+            // preparation
+            var originalCulture = CultureInfo.CurrentCulture;
+            CultureInfo.CurrentCulture = new CultureInfo("da-DK");
+
+            try
+            {
+                // execution
+                var result = EasyPostShippingProvider.MapRates([CreateRate(price: "12.50")], "USD", Guid.NewGuid(), Guid.NewGuid());
+
+                // asserts
+                result.Should().ContainSingle().Which.Value.WithoutTax.Should().Be(12.50m);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = originalCulture;
+            }
+        }
+
+        [Fact]
         public void MapRates_Should_Treat_Missing_Price_As_Zero()
         {
             // execution
@@ -90,6 +112,8 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost.UnitTests
         [InlineData("USPS", "Priority", "USPS - Priority")]
         [InlineData("USPS", "ParcelSelect", "USPS - Parcel Select")]
         [InlineData("DHLExpress", "ExpressWorldwide", "DHL Express - Express Worldwide")]
+        [InlineData("FedEx", "FEDEX_GROUND", "Fed Ex - FEDEX GROUND")]
+        [InlineData("FedEx", "FEDEX_2_DAY", "Fed Ex - FEDEX 2 DAY")]
         [InlineData("USPS", "", "USPS")]
         [InlineData("", "Priority", "Priority")]
         public void CreateDescription_Should_Split_Pascal_Case_And_Trim_Separator(string carrier, string service, string expected)

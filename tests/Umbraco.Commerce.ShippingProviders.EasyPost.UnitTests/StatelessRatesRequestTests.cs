@@ -83,6 +83,41 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost.UnitTests
             to.Country.Should().Be("US");
         }
 
+        [Fact]
+        public void BuildStatelessRatesRequest_Should_Map_Sender_Address_To_FromAddress()
+        {
+            // execution
+            var request = _provider.BuildStatelessRatesRequest(Guid.NewGuid(), "Jane", "Doe", MeasurementSystem.Metric, CreatePackage(), null!);
+
+            // asserts
+            var from = (global::EasyPost.Parameters.Address.Create)request.FromAddress;
+            from.Street1.Should().Be("1 Sender St");
+            from.City.Should().Be("Sender City");
+            from.Zip.Should().Be("11111");
+            from.Country.Should().Be("US");
+        }
+
+        [Fact]
+        public void BuildStatelessRatesRequest_Should_Set_Carrier_Accounts_From_Setting()
+        {
+            // execution
+            var request = _provider.BuildStatelessRatesRequest(Guid.NewGuid(), "Jane", "Doe", MeasurementSystem.Metric, CreatePackage(), "ca_1, ca_2");
+
+            // asserts
+            request.CarrierAccounts.Should().NotBeNull();
+            request.CarrierAccounts!.Select(x => x.Id).Should().Equal("ca_1", "ca_2");
+        }
+
+        [Fact]
+        public void BuildStatelessRatesRequest_Should_Leave_Carrier_Accounts_Unset_When_Setting_Is_Blank()
+        {
+            // execution
+            var request = _provider.BuildStatelessRatesRequest(Guid.NewGuid(), "Jane", "Doe", MeasurementSystem.Metric, CreatePackage(), " ");
+
+            // asserts
+            request.CarrierAccounts.Should().BeNullOrEmpty();
+        }
+
         [Theory]
         [InlineData("Jane", "Doe", "Jane Doe")]
         [InlineData("Jane", "", "Jane")]
