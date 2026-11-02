@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -30,7 +31,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
 
             if (package == null || !package.HasMeasurements)
             {
-                logger.Debug("Unable to calculate realtime DHL rates as the package provided is invalid");
+                logger.Debug("Unable to calculate realtime EasyPost rates as the package provided is invalid");
                 return ShippingRatesResult.Empty;
             }
 
@@ -60,11 +61,12 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 },
                 FromAddress = new EasyPostParams.Address.Create
                 {
-                    Street1 = package.ReceiverAddress.AddressLine1,
-                    City = package.ReceiverAddress.City,
-                    State = package.ReceiverAddress.Region,
-                    Zip = package.ReceiverAddress.ZipCode,
-                    Country = package.ReceiverAddress.CountryIsoCode
+                    Street1 = package.SenderAddress.AddressLine1,
+                    Street2 = package.SenderAddress.AddressLine2,
+                    City = package.SenderAddress.City,
+                    State = package.SenderAddress.Region,
+                    Zip = package.SenderAddress.ZipCode,
+                    Country = package.SenderAddress.CountryIsoCode
                 },
                 Parcel = new EasyPostParams.Parcel.Create
                 {
@@ -84,7 +86,8 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                         .ToArray();
                 if (carrierAccount.Length > 0)
                 {
-                    request.CarrierAccounts.AddRange(carrierAccount);
+                    // The SDK leaves CarrierAccounts null, so assign the list rather than adding to it
+                    request.CarrierAccounts = [.. carrierAccount];
                 }
             }
 
@@ -96,7 +99,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 Rates = rates
                     .Where(x => x.Currency.Equals(orderCurrency.Code, StringComparison.OrdinalIgnoreCase))
                     .Select(x => new ShippingRate(
-                            new Price(decimal.Parse(x.Price ?? "0"), 0, context.Order.CurrencyId),
+                            new Price(decimal.Parse(x.Price ?? "0", NumberStyles.Number, CultureInfo.InvariantCulture), 0, context.Order.CurrencyId),
                             new ShippingOption(CreateCompositeId(x.Carrier, x.Service), CreateDescription(x.Carrier, x.Service)),
                             package.Id
                         )).ToList()
@@ -106,6 +109,10 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
         private static string CreateCompositeId(string carrierCode, string productCode)
             => $"{carrierCode}__{productCode}".Trim('_');
         private static string CreateDescription(string carrierCode, string productCode)
-            => $"{PASCAL_CASE_PATTERN.Replace(carrierCode, " ")} - {PASCAL_CASE_PATTERN.Replace(productCode, " ")}".Trim(' ', '-');
+            => $"{SplitWords(carrierCode)} - {SplitWords(productCode)}".Trim(' ', '-');
+
+        // Splits PascalCase codes into words and treats underscores as word breaks, so FEDEX_GROUND reads "FEDEX GROUND"
+        private static string SplitWords(string code)
+            => string.Join(" ", PASCAL_CASE_PATTERN.Replace(code ?? string.Empty, " ").Split([' ', '_'], StringSplitOptions.RemoveEmptyEntries));
     }
 }
