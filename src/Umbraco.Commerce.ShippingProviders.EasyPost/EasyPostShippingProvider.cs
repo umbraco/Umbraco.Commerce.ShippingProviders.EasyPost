@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using EasyPost;
 using EasyPost.Models.API;
+using EasyPost.Models.API.Beta;
 using Umbraco.Commerce.Common.Logging;
 using Umbraco.Commerce.Core.Api;
 using Umbraco.Commerce.Core.Models;
@@ -30,7 +33,7 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
 
             if (package == null || !package.HasMeasurements)
             {
-                logger.Debug("Unable to calculate realtime DHL rates as the package provided is invalid");
+                logger.Debug("Unable to calculate realtime EasyPost rates as the package provided is invalid");
                 return ShippingRatesResult.Empty;
             }
 
@@ -40,15 +43,40 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 : context.Settings.LiveApiKey);
             var client = new Client(clientConfig);
 
-            var pkgLength = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Length) : package.Length;
-            var pkgWidth = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Width) : package.Width;
-            var pkgHeight = context.MeasurementSystem == MeasurementSystem.Metric ? CmToIn(package.Height) : package.Height;
-            var pkgWeight = context.MeasurementSystem == MeasurementSystem.Metric ? KgToOz(package.Weight) : LbToOz(package.Weight);
-            var customerName = $"{context.Order.CustomerInfo.FirstName} {context.Order.CustomerInfo.LastName}".Trim();
+            var request = BuildStatelessRatesRequest(
+                context.Order.Id,
+                context.Order.CustomerInfo.FirstName,
+                context.Order.CustomerInfo.LastName,
+                context.MeasurementSystem,
+                package,
+                context.Settings.CarrierAccounts);
+
+            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken);
+            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
+
+            return new ShippingRatesResult
+            {
+                Rates = MapRates(rates, orderCurrency.Code, context.Order.CurrencyId, package.Id)
+            };
+        }
+
+        internal EasyPostParams.Beta.Rate.Retrieve BuildStatelessRatesRequest(
+            Guid orderId,
+            string customerFirstName,
+            string customerLastName,
+            MeasurementSystem measurementSystem,
+            Package package,
+            string carrierAccounts)
+        {
+            var pkgLength = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Length) : package.Length;
+            var pkgWidth = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Width) : package.Width;
+            var pkgHeight = measurementSystem == MeasurementSystem.Metric ? CmToIn(package.Height) : package.Height;
+            var pkgWeight = measurementSystem == MeasurementSystem.Metric ? KgToOz(package.Weight) : LbToOz(package.Weight);
+            var customerName = $"{customerFirstName} {customerLastName}".Trim();
 
             var request = new EasyPostParams.Beta.Rate.Retrieve
             {
-                Reference = context.Order.Id.ToString(),
+                Reference = orderId.ToString(),
                 ToAddress = new EasyPostParams.Address.Create
                 {
                     Name = customerName,
@@ -60,11 +88,12 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 },
                 FromAddress = new EasyPostParams.Address.Create
                 {
-                    Street1 = package.ReceiverAddress.AddressLine1,
-                    City = package.ReceiverAddress.City,
-                    State = package.ReceiverAddress.Region,
-                    Zip = package.ReceiverAddress.ZipCode,
-                    Country = package.ReceiverAddress.CountryIsoCode
+                    Street1 = package.SenderAddress.AddressLine1,
+                    Street2 = package.SenderAddress.AddressLine2,
+                    City = package.SenderAddress.City,
+                    State = package.SenderAddress.Region,
+                    Zip = package.SenderAddress.ZipCode,
+                    Country = package.SenderAddress.CountryIsoCode
                 },
                 Parcel = new EasyPostParams.Parcel.Create
                 {
@@ -75,37 +104,46 @@ namespace Umbraco.Commerce.ShippingProviders.EasyPost
                 }
             };
 
-            if (!string.IsNullOrWhiteSpace(context.Settings.CarrierAccounts))
+            var carrierAccountList = ParseCarrierAccounts(carrierAccounts);
+            if (carrierAccountList.Length > 0)
             {
-                var carrierAccount = context.Settings.CarrierAccounts.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim())
-                        .Where(x => !string.IsNullOrWhiteSpace(x))
-                        .Select(x => new CarrierAccount { Id = x })
-                        .ToArray();
-                if (carrierAccount.Length > 0)
-                {
-                    request.CarrierAccounts.AddRange(carrierAccount);
-                }
+                // The SDK leaves CarrierAccounts null, so assign the list rather than adding to it
+                request.CarrierAccounts = [.. carrierAccountList];
             }
 
-            var rates = await client.Beta.Rate.RetrieveStatelessRates(request, cancellationToken);
-            var orderCurrency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
-
-            return new ShippingRatesResult
-            {
-                Rates = rates
-                    .Where(x => x.Currency.Equals(orderCurrency.Code, StringComparison.OrdinalIgnoreCase))
-                    .Select(x => new ShippingRate(
-                            new Price(decimal.Parse(x.Price ?? "0"), 0, context.Order.CurrencyId),
-                            new ShippingOption(CreateCompositeId(x.Carrier, x.Service), CreateDescription(x.Carrier, x.Service)),
-                            package.Id
-                        )).ToList()
-            };
+            return request;
         }
 
-        private static string CreateCompositeId(string carrierCode, string productCode)
+        internal static CarrierAccount[] ParseCarrierAccounts(string carrierAccounts)
+        {
+            if (string.IsNullOrWhiteSpace(carrierAccounts))
+            {
+                return [];
+            }
+
+            return carrierAccounts.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => new CarrierAccount { Id = x })
+                .ToArray();
+        }
+
+        internal static List<ShippingRate> MapRates(IEnumerable<StatelessRate> rates, string orderCurrencyCode, Guid currencyId, Guid packageId)
+            => rates
+                .Where(x => x.Currency.Equals(orderCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                .Select(x => new ShippingRate(
+                    new Price(decimal.Parse(x.Price ?? "0", NumberStyles.Number, CultureInfo.InvariantCulture), 0, currencyId),
+                    new ShippingOption(CreateCompositeId(x.Carrier, x.Service), CreateDescription(x.Carrier, x.Service)),
+                    packageId))
+                .ToList();
+
+        internal static string CreateCompositeId(string carrierCode, string productCode)
             => $"{carrierCode}__{productCode}".Trim('_');
-        private static string CreateDescription(string carrierCode, string productCode)
-            => $"{PASCAL_CASE_PATTERN.Replace(carrierCode, " ")} - {PASCAL_CASE_PATTERN.Replace(productCode, " ")}".Trim(' ', '-');
+        internal static string CreateDescription(string carrierCode, string productCode)
+            => $"{SplitWords(carrierCode)} - {SplitWords(productCode)}".Trim(' ', '-');
+
+        // Splits PascalCase codes into words and treats underscores as word breaks, so FEDEX_GROUND reads "FEDEX GROUND"
+        private static string SplitWords(string code)
+            => string.Join(" ", PASCAL_CASE_PATTERN.Replace(code ?? string.Empty, " ").Split([' ', '_'], StringSplitOptions.RemoveEmptyEntries));
     }
 }
